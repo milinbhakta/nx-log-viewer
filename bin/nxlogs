@@ -550,6 +550,82 @@ filter_by_time() {
 # Log Formatting
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Build a filter command for stripping log prefixes (for use in pipelines)
+# Returns a command string that can be used with eval or in a pipeline
+build_strip_filter() {
+    local filter="cat"
+    
+    # Apply preset patterns
+    case "$STRIP_PRESET" in
+        dapr)
+            filter="sed -E 's/^[a-zA-Z0-9_-]+: == APP == [0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}[,.][0-9]+(Z)? - [A-Za-z._]+ - (INFO|DEBUG|WARNING|ERROR|CRITICAL) - //'"
+            ;;
+        nx)
+            filter="sed -E 's/^\[[a-zA-Z0-9_-]+\] //'"
+            ;;
+        minimal)
+            filter="sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}[,.][0-9]+(Z)? - [A-Za-z._]+ - (INFO|DEBUG|WARNING|ERROR|CRITICAL) - //'"
+            ;;
+    esac
+    
+    # Apply custom strip pattern if set (chain with previous filter)
+    if [[ -n "$STRIP_PATTERN" ]]; then
+        if [[ "$filter" == "cat" ]]; then
+            filter="sed -E 's/$STRIP_PATTERN//'"
+        else
+            filter="$filter | sed -E 's/$STRIP_PATTERN//'"
+        fi
+    fi
+    
+    # Strip N characters from front using cut
+    if [[ "$STRIP_FRONT" -gt 0 ]] 2>/dev/null; then
+        local start=$((STRIP_FRONT + 1))
+        if [[ "$filter" == "cat" ]]; then
+            filter="cut -c${start}-"
+        else
+            filter="$filter | cut -c${start}-"
+        fi
+    fi
+    
+    # Strip N characters from back using sed
+    if [[ "$STRIP_BACK" -gt 0 ]] 2>/dev/null; then
+        if [[ "$filter" == "cat" ]]; then
+            filter="sed 's/.\{$STRIP_BACK\}$//'"
+        else
+            filter="$filter | sed 's/.\{$STRIP_BACK\}$//'"
+        fi
+    fi
+    
+    # Strip everything before a delimiter
+    if [[ -n "$STRIP_BEFORE" ]]; then
+        local escaped_delim="${STRIP_BEFORE//\//\\/}"
+        if [[ "$filter" == "cat" ]]; then
+            filter="sed 's/.*${escaped_delim}//'"
+        else
+            filter="$filter | sed 's/.*${escaped_delim}//'"
+        fi
+    fi
+    
+    # Strip everything after a delimiter
+    if [[ -n "$STRIP_AFTER" ]]; then
+        local escaped_delim="${STRIP_AFTER//\//\\/}"
+        if [[ "$filter" == "cat" ]]; then
+            filter="sed 's/${escaped_delim}.*//'"
+        else
+            filter="$filter | sed 's/${escaped_delim}.*//'"
+        fi
+    fi
+    
+    echo "$filter"
+}
+
+# Check if any stripping is configured
+has_strip_config() {
+    [[ -n "$STRIP_PATTERN" ]] || [[ -n "$STRIP_PRESET" ]] || 
+    [[ "$STRIP_FRONT" -gt 0 ]] 2>/dev/null || [[ "$STRIP_BACK" -gt 0 ]] 2>/dev/null ||
+    [[ -n "$STRIP_BEFORE" ]] || [[ -n "$STRIP_AFTER" ]]
+}
+
 # Strip unwanted prefixes from log lines based on STRIP_PATTERN or STRIP_PRESET
 strip_log_prefix() {
     local line="$1"
@@ -1683,6 +1759,12 @@ process_multiplexed_logs() {
     local esc
     esc=$(printf '\033')
     
+    # Check if stripping is configured
+    local do_strip=false
+    if has_strip_config; then
+        do_strip=true
+    fi
+    
     while IFS= read -r line; do
         # Strip CR for Windows compatibility
         line="${line//$'\r'/}"
@@ -1711,14 +1793,24 @@ process_multiplexed_logs() {
             log_file=$(get_log_file "$project_root" "$app_name")
             # Ensure dir exists
             mkdir -p "$(dirname "$log_file")"
-            echo "$line" >> "$log_file"
             
-            # Format for display
+            # Apply stripping before writing to file
+            local stripped_line="$line"
+            if [[ "$do_strip" == "true" ]]; then
+                stripped_line=$(strip_log_prefix "$line")
+            fi
+            echo "$stripped_line" >> "$log_file"
+            
+            # Format for display (strip_log_prefix is called inside format_follow_line -> colorize_line)
             format_follow_line "$line" "$app_name"
         else
             # No app detected
             # Write to a combined log file so we don't lose data if regex fails
-            echo "$line" >> "$log_dir/_combined.log"
+            local stripped_line="$line"
+            if [[ "$do_strip" == "true" ]]; then
+                stripped_line=$(strip_log_prefix "$line")
+            fi
+            echo "$stripped_line" >> "$log_dir/_combined.log"
             
             # Just print to stdout
             echo "$line"
@@ -1776,7 +1868,15 @@ cmd_run() {
     local log_dir="$project_root/$LOG_DIR"
     mkdir -p "$log_dir"
     
-    echo -e "${GRAY}Logs will be written to: $log_dir${RESET}\n"
+    echo -e "${GRAY}Logs will be written to: $log_dir${RESET}"
+    
+    # Build strip filter for log files if configured
+    local strip_filter="cat"
+    if has_strip_config; then
+        strip_filter=$(build_strip_filter)
+        echo -e "${GRAY}Log stripping enabled: $strip_filter${RESET}"
+    fi
+    echo ""
     
     # Trap to kill background processes on exit/interrupt
     trap 'kill $(jobs -p) 2>/dev/null' EXIT SIGINT SIGTERM
@@ -1793,8 +1893,10 @@ cmd_run() {
         
         # Run in background with individual log capturing
         # We use NX_DAEMON=false and NX_INTERACTIVE=false for robustness
+        # Apply strip filter before writing to log file AND before display
         ( 
             NX_DAEMON=false NX_INTERACTIVE=false $nx_cmd run "$app:$target" --output-style=stream "${args[@]}" 2>&1 \
+            | eval "$strip_filter" \
             | tee "$log_file" \
             | while IFS= read -r line; do format_follow_line "$line" "$app"; done 
         ) &

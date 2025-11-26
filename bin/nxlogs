@@ -1513,15 +1513,24 @@ process_multiplexed_logs() {
     
     mkdir -p "$log_dir"
     
+    # Define ESC for ANSI stripping (portable)
+    local esc
+    esc=$(printf '\033')
+    
     while IFS= read -r line; do
-        # Check for [app] prefix
-        # Remove ANSI codes for regex matching using bash substitution (faster than sed)
-        local clean_line="${line//$'\e'\[[0-9;]*[mK]/}"
+        # Strip CR for Windows compatibility
+        line="${line//$'\r'/}"
+        
+        # Strip ANSI codes using bash substitution
+        # This removes color codes and line clearing sequences
+        local clean_line="${line//${esc}\[[0-9;]*[mK]/}"
         
         local app_name=""
         
-        # Match [app] or [ app ]
-        if [[ "$clean_line" =~ ^\[[[:space:]]*([^]]+)[[:space:]]*\] ]]; then
+        # Match [app] prefix
+        # Supports: [app], [org/app], [app-name], [app_name], [app.name]
+        # We allow leading non-alphanumeric chars to handle potential leftover control codes
+        if [[ "$clean_line" =~ ^[^a-zA-Z0-9]*\[[[:space:]]*([@a-zA-Z0-9_./-]+)[[:space:]]*\] ]]; then
             app_name="${BASH_REMATCH[1]}"
         elif [[ "$clean_line" =~ ^\>[\ ]*nx[\ ]*run[\ ]*([^:]+): ]]; then
              app_name="${BASH_REMATCH[1]}"
@@ -1559,7 +1568,8 @@ cmd_run_many() {
     if ! command -v nx &> /dev/null; then nx_cmd="npx nx"; fi
     
     # Force stream output to ensure we get [app] prefixes
-    $nx_cmd run-many --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
+    # Set NX_INTERACTIVE=false to prevent spinner/dynamic output issues
+    NX_INTERACTIVE=false $nx_cmd run-many --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
 }
 
 cmd_run() {
@@ -1611,7 +1621,7 @@ cmd_run() {
         echo -e "${GRAY}Logs will be written to individual app log files in $project_root/$LOG_DIR${RESET}\n"
         
         # Use run-many with forced stream output
-        $nx_cmd run-many --target="$target" --projects="$app_list" --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
+        NX_INTERACTIVE=false $nx_cmd run-many --target="$target" --projects="$app_list" --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
     fi
 }
 

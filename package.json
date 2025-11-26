@@ -1,6 +1,6 @@
 {
   "name": "nx-log-viewer",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A beautiful CLI tool for viewing and managing logs in NX monorepos",
   "main": "bin/nxlogs",
   "bin": {

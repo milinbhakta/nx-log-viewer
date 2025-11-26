@@ -1,0 +1,112 @@
+#compdef nxlogs
+# ═══════════════════════════════════════════════════════════════════════════════
+# NX Log Viewer - Zsh Completion
+# ═══════════════════════════════════════════════════════════════════════════════
+# Installation:
+#   Add this directory to your fpath in ~/.zshrc (before compinit):
+#     fpath=(/path/to/completions $fpath)
+#   
+#   Or copy to a directory in your fpath:
+#     cp _nxlogs ~/.zsh/completions/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_nxlogs_apps() {
+    local log_dir="${LOG_DIR:-logs/nx}"
+    local project_root="$PWD"
+    
+    # Find project root
+    while [[ "$project_root" != "/" ]]; do
+        if [[ -f "$project_root/nx.json" ]]; then
+            break
+        fi
+        project_root="$(dirname "$project_root")"
+    done
+    
+    # Get apps from log files
+    local apps=()
+    if [[ -d "$project_root/$log_dir" ]]; then
+        for f in "$project_root/$log_dir"/*.log(N); do
+            apps+=(${f:t:r})
+        done
+    fi
+    
+    _describe -t apps 'apps' apps
+}
+
+_nxlogs_themes() {
+    local themes=(
+        'default:Standard colors for most terminals'
+        'dark:High contrast for dark terminals'
+        'light:Darker colors for light terminals'
+        'minimal:Subtle, minimal colors'
+        'cyberpunk:Neon colors for style'
+    )
+    _describe -t themes 'themes' themes
+}
+
+_nxlogs_time_expressions() {
+    local expressions=(
+        '"1 hour ago":One hour ago'
+        '"2 hours ago":Two hours ago'
+        '"30 minutes ago":Thirty minutes ago'
+        '"1 day ago":One day ago'
+        '"7 days ago":One week ago'
+        '"1 week ago":One week ago'
+        '"1 month ago":One month ago'
+    )
+    _describe -t time 'time expressions' expressions
+}
+
+_nxlogs() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+    
+    local -a options
+    options=(
+        '(-h --help)'{-h,--help}'[Show help message]'
+        '(-v --version)'{-v,--version}'[Show version]'
+        '(-f --follow)'{-f,--follow}'[Follow logs in real-time]'
+        '(-n --lines)'{-n,--lines}'[Number of lines to show]:lines:(10 25 50 100 200 500 1000)'
+        '(-a --all)'{-a,--all}'[View all app logs combined]'
+        '(-s --search)'{-s,--search}'[Search for a term in logs]:search term:'
+        '(-e --errors)'{-e,--errors}'[Show only errors and warnings]'
+        '--since[Show logs since specified time]:time:->time'
+        '--until[Show logs until specified time]:time:->time'
+        '--rotate[Rotate log files]:app:->apps_or_all'
+        '--max-lines[Max lines before rotation]:lines:(5000 7000 10000 20000)'
+        '--trim-to[Lines to keep after rotation]:lines:(3000 5000 7000 10000)'
+        '--json[Output logs in JSON format]'
+        '--export[Export filtered logs to a file]:file:_files'
+        '(-q --quiet)'{-q,--quiet}'[Suppress headers and status messages]'
+        '--stats[Show log file statistics]'
+        '--apps[List available apps]'
+        '--clean[Remove all log files]'
+        '--init[Create config file]'
+        '--config[Show current configuration]'
+        '--demo[Generate demo logs]:apps:->apps_or_all'
+        '--no-color[Disable colored output]'
+        '--theme[Color theme]:theme:->themes'
+        '*:app:->apps'
+    )
+    
+    _arguments -C $options && return
+    
+    case "$state" in
+        apps)
+            _nxlogs_apps
+            ;;
+        apps_or_all)
+            _alternative \
+                'all:all:((all\:"All apps"))' \
+                'apps:app:_nxlogs_apps'
+            ;;
+        themes)
+            _nxlogs_themes
+            ;;
+        time)
+            _nxlogs_time_expressions
+            ;;
+    esac
+}
+
+_nxlogs "$@"

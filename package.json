@@ -1,0 +1,48 @@
+{
+  "name": "nx-log-viewer",
+  "version": "1.1.0",
+  "description": "A beautiful CLI tool for viewing and managing logs in NX monorepos",
+  "main": "bin/nxlogs",
+  "bin": {
+    "nxlogs": "./bin/nxlogs"
+  },
+  "scripts": {
+    "test": "bash -n bin/nxlogs && echo 'Syntax check passed'",
+    "postinstall": "echo '\n✅ NX Log Viewer installed! Run: nxlogs --help\n'"
+  },
+  "keywords": [
+    "nx",
+    "monorepo",
+    "logs",
+    "cli",
+    "viewer",
+    "tail",
+    "logging",
+    "developer-tools"
+  ],
+  "author": "Milin Bhakta",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Maximus-Canada/nx-log-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Maximus-Canada/nx-log-viewer/issues"
+  },
+  "homepage": "https://github.com/Maximus-Canada/nx-log-viewer#readme",
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "files": [
+    "bin/",
+    "completions/",
+    ".nxlogsrc.example",
+    "README.md",
+    "LICENSE"
+  ],
+  "preferGlobal": true,
+  "os": [
+    "linux",
+    "darwin"
+  ]
+}

@@ -1,0 +1,78 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# NX Log Viewer Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+# Place this file in your project root as .nxlogsrc
+# Or in your home directory as ~/.nxlogsrc for global settings
+# Project-level settings override user-level settings
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── Log Directory ─────────────────────────────────────────────────────────
+# Where to find log files (relative to project root)
+# Common options: "logs", "logs/nx", ".nx/logs", "tmp/logs"
+LOG_DIR="logs/nx"
+
+# ─── Display Options ───────────────────────────────────────────────────────
+# Add timestamps to log output
+TIMESTAMP=true
+
+# Timestamp format (strftime format)
+TIMESTAMP_FORMAT="%Y-%m-%d %H:%M:%S"
+
+# Show app name prefix in output [app-name]
+SHOW_APP_NAME=true
+
+# Enable colored output
+COLORIZE=true
+
+# Color theme: default, dark, light, minimal
+THEME="default"
+
+# ─── App Discovery ─────────────────────────────────────────────────────────
+# Automatically discover apps from nx.json/project.json
+AUTO_DISCOVER=true
+
+# Custom app list (space-separated, overrides auto-discovery if set)
+# APPS="api web admin worker"
+
+# Directories to scan for apps (space-separated)
+APP_DIRS="apps packages libs"
+
+# ─── Default Behavior ──────────────────────────────────────────────────────
+# Default number of lines to show
+DEFAULT_LINES=50
+
+# Pager for long output (set to "" to disable)
+PAGER="less -R"
+
+# ─── Pattern Matching ──────────────────────────────────────────────────────
+# Patterns to highlight as errors (regex, case-insensitive)
+HIGHLIGHT_ERRORS="error|exception|failed|fatal|critical"
+
+# Patterns to highlight as warnings (regex, case-insensitive)
+HIGHLIGHT_WARNINGS="warn|warning|deprecated"
+
+# Patterns to highlight as success (regex, case-insensitive)
+HIGHLIGHT_SUCCESS="success|completed|ready|started|listening"
+
+# Patterns to highlight as debug (regex, case-insensitive)
+HIGHLIGHT_DEBUG="debug|trace|verbose"
+
+# Patterns to ignore/hide (regex, leave empty to show all)
+IGNORE_PATTERNS=""
+
+# ─── Log File Naming ───────────────────────────────────────────────────────
+# Log file extension
+LOG_EXTENSION=".log"
+
+# Log file naming pattern ({app} will be replaced with app name)
+LOG_FILE_PATTERN="{app}.log"
+
+# ─── Log Rotation ──────────────────────────────────────────────────────────
+# Enable automatic rotation when viewing logs
+ENABLE_ROTATION=false
+
+# Maximum lines before triggering rotation
+MAX_LOG_LINES=7000
+
+# Number of lines to keep after rotation (removes lines from top)
+TRIM_TO_LINES=5000

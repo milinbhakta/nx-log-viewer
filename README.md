@@ -77,20 +77,27 @@ nxlogs --stats
 
 ## 🚀 Serving Apps & Capturing Logs
 
-NX Log Viewer can act as a wrapper around `nx serve` to automatically capture output to log files:
+NX Log Viewer can act as a wrapper around `nx serve` or `nx run` to automatically capture output to log files:
 
 ```bash
 # Start 'api' and capture logs
 nxlogs serve api
 
+# Start multiple apps (uses nx run-many)
+nxlogs serve api web
+
 # Pass arguments to the underlying command
 nxlogs serve api --port=4000 --host=0.0.0.0
+
+# Run any target and capture logs
+nxlogs run build api web
+nxlogs run test api
 ```
 
-This will:
-1. Run `nx serve api`
-2. Pipe output to `logs/nx/api.log`
-3. Show formatted output in your terminal simultaneously
+When running multiple apps, `nxlogs` will:
+1. Execute `nx run-many`
+2. Split the interleaved output into separate log files (e.g., `logs/nx/api.log`, `logs/nx/web.log`)
+3. Show the output in your terminal simultaneously
 
 ## 📖 Commands
 
@@ -98,7 +105,8 @@ This will:
 |---------|-------------|
 | `nxlogs` | Interactive app selection menu |
 | `nxlogs <app>` | View logs for specific app |
-| `nxlogs serve <app>` | Start app and capture logs to file |
+| `nxlogs serve <apps...>` | Start app(s) and capture logs to file |
+| `nxlogs run <target> <apps...>` | Run target for app(s) and capture logs |
 | `nxlogs --daemon` | View NX Daemon logs |
 | `nxlogs --cache` | View recent NX task runner logs |
 | `nxlogs -f, --follow` | Follow logs in real-time |

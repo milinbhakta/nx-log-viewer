@@ -642,7 +642,8 @@ ${BOLD}USAGE${RESET}
 ${BOLD}COMMANDS${RESET}
     (default)           Interactive app selection
     <app>               View logs for specific app(s)
-    serve <app>         Start app and capture logs to file
+    serve <apps...>     Start app(s) and capture logs to file
+    run <target> <apps> Run any target for app(s) and capture logs
     
 ${BOLD}OPTIONS${RESET}
     -f, --follow        Follow logs in real-time (like tail -f)
@@ -1465,39 +1466,99 @@ cmd_view_json() {
     done
 }
 
-cmd_serve() {
+process_multiplexed_logs() {
     local project_root="$1"
-    local app="$2"
-    shift 2
-    local args=("$@")
-    
-    if [[ -z "$app" ]]; then
-        log_error "Please specify an app to serve"
-        return 1
-    fi
-    
-    local log_file
-    log_file=$(get_log_file "$project_root" "$app")
-    local log_dir
-    log_dir=$(dirname "$log_file")
+    local log_dir="$project_root/$LOG_DIR"
     
     mkdir -p "$log_dir"
     
-    echo -e "${BOLD}${CYAN}═══ Serving $app ═══${RESET}"
-    echo -e "${GRAY}Logs will be written to: $log_file${RESET}\n"
+    while IFS= read -r line; do
+        # Check for [app] prefix
+        # Remove ANSI codes for regex matching
+        local clean_line
+        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+        
+        local app_name=""
+        
+        if [[ "$clean_line" =~ ^\[([^]]+)\] ]]; then
+            app_name="${BASH_REMATCH[1]}"
+        elif [[ "$clean_line" =~ ^\>[\ ]*nx[\ ]*run[\ ]*([^:]+): ]]; then
+             app_name="${BASH_REMATCH[1]}"
+        fi
+        
+        if [[ -n "$app_name" ]]; then
+            local log_file
+            log_file=$(get_log_file "$project_root" "$app_name")
+            # Ensure dir exists
+            mkdir -p "$(dirname "$log_file")"
+            echo "$line" >> "$log_file"
+            
+            # Format for display
+            format_follow_line "$line" "$app_name"
+        else
+            # No app detected, just print
+            echo "$line"
+        fi
+    done
+}
+
+cmd_run() {
+    local project_root="$1"
+    local target="$2"
+    shift 2
     
-    # Start NX serve and pipe to log file while also showing in terminal
-    # We use 'tee' to split the output
-    if command -v nx &> /dev/null; then
-        nx serve "$app" "${args[@]}" 2>&1 | tee -a "$log_file" | while IFS= read -r line; do
+    local apps=()
+    local args=()
+    
+    # Parse apps and args
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == -* ]]; then
+            args+=("$@")
+            break
+        else
+            apps+=("$1")
+            shift
+        fi
+    done
+    
+    if [[ ${#apps[@]} -eq 0 ]]; then
+        log_error "Please specify at least one app"
+        return 1
+    fi
+    
+    echo -e "${BOLD}${CYAN}═══ Running target '$target' for ${#apps[@]} app(s) ═══${RESET}"
+    
+    local nx_cmd="nx"
+    if ! command -v nx &> /dev/null; then nx_cmd="npx nx"; fi
+    
+    if [[ ${#apps[@]} -eq 1 ]]; then
+        # Single app mode
+        local app="${apps[0]}"
+        local log_file
+        log_file=$(get_log_file "$project_root" "$app")
+        mkdir -p "$(dirname "$log_file")"
+        
+        echo -e "${GRAY}Logs will be written to: $log_file${RESET}\n"
+        
+        $nx_cmd run "$app:$target" "${args[@]}" 2>&1 | tee -a "$log_file" | while IFS= read -r line; do
             format_follow_line "$line" "$app"
         done
     else
-        # Try npx if nx is not in path
-        npx nx serve "$app" "${args[@]}" 2>&1 | tee -a "$log_file" | while IFS= read -r line; do
-            format_follow_line "$line" "$app"
-        done
+        # Multi app mode
+        local app_list
+        app_list=$(IFS=,; echo "${apps[*]}")
+        
+        echo -e "${GRAY}Logs will be written to individual app log files in $project_root/$LOG_DIR${RESET}\n"
+        
+        # Use run-many
+        $nx_cmd run-many --target="$target" --projects="$app_list" "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
     fi
+}
+
+cmd_serve() {
+    local project_root="$1"
+    shift
+    cmd_run "$project_root" "serve" "$@"
 }
 
 cmd_daemon() {
@@ -1588,14 +1649,23 @@ main() {
     local quiet="false"
     local demo_apps=""
     
-    # Check for 'serve' command first as it consumes remaining args
+    # Check for 'serve' or 'run' command first as they consume remaining args
     if [[ "$1" == "serve" ]]; then
         cmd="serve"
         shift
-        local serve_app="$1"
-        shift
-        # Remaining args are passed to nx serve
-        local serve_args=("$@")
+        # Collect apps until we hit a flag or --
+        local serve_apps=()
+        local serve_args=()
+        
+        while [[ $# -gt 0 ]]; do
+            if [[ "$1" == -* ]]; then
+                serve_args+=("$@")
+                break
+            else
+                serve_apps+=("$1")
+                shift
+            fi
+        done
         
         # Setup colors and config before running
         setup_colors
@@ -1605,7 +1675,36 @@ main() {
         fi
         load_config "$project_root"
         
-        cmd_serve "$project_root" "$serve_app" "${serve_args[@]}"
+        cmd_serve "$project_root" "${serve_apps[@]}" "${serve_args[@]}"
+        exit $?
+    elif [[ "$1" == "run" ]]; then
+        cmd="run"
+        shift
+        local target="$1"
+        shift
+        # Collect apps until we hit a flag or --
+        local run_apps=()
+        local run_args=()
+        
+        while [[ $# -gt 0 ]]; do
+            if [[ "$1" == -* ]]; then
+                run_args+=("$@")
+                break
+            else
+                run_apps+=("$1")
+                shift
+            fi
+        done
+        
+        # Setup colors and config before running
+        setup_colors
+        if ! project_root=$(find_project_root); then
+            log_error "Not in an NX workspace"
+            exit 1
+        fi
+        load_config "$project_root"
+        
+        cmd_run "$project_root" "$target" "${run_apps[@]}" "${run_args[@]}"
         exit $?
     fi
     

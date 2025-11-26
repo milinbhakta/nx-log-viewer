@@ -1515,19 +1515,23 @@ process_multiplexed_logs() {
     
     while IFS= read -r line; do
         # Check for [app] prefix
-        # Remove ANSI codes for regex matching
-        local clean_line
-        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+        # Remove ANSI codes for regex matching using bash substitution (faster than sed)
+        local clean_line="${line//$'\e'\[[0-9;]*[mK]/}"
         
         local app_name=""
         
-        if [[ "$clean_line" =~ ^\[([^]]+)\] ]]; then
+        # Match [app] or [ app ]
+        if [[ "$clean_line" =~ ^\[[[:space:]]*([^]]+)[[:space:]]*\] ]]; then
             app_name="${BASH_REMATCH[1]}"
         elif [[ "$clean_line" =~ ^\>[\ ]*nx[\ ]*run[\ ]*([^:]+): ]]; then
              app_name="${BASH_REMATCH[1]}"
         fi
         
         if [[ -n "$app_name" ]]; then
+            # Trim whitespace from app_name
+            app_name="${app_name#"${app_name%%[![:space:]]*}"}"
+            app_name="${app_name%"${app_name##*[![:space:]]}"}"
+            
             local log_file
             log_file=$(get_log_file "$project_root" "$app_name")
             # Ensure dir exists
@@ -1554,7 +1558,8 @@ cmd_run_many() {
     local nx_cmd="nx"
     if ! command -v nx &> /dev/null; then nx_cmd="npx nx"; fi
     
-    $nx_cmd run-many "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
+    # Force stream output to ensure we get [app] prefixes
+    $nx_cmd run-many --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
 }
 
 cmd_run() {
@@ -1605,8 +1610,8 @@ cmd_run() {
         
         echo -e "${GRAY}Logs will be written to individual app log files in $project_root/$LOG_DIR${RESET}\n"
         
-        # Use run-many
-        $nx_cmd run-many --target="$target" --projects="$app_list" "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
+        # Use run-many with forced stream output
+        $nx_cmd run-many --target="$target" --projects="$app_list" --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
     fi
 }
 

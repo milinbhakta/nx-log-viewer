@@ -660,46 +660,67 @@ ${BOLD}USAGE${RESET}
     $SCRIPT_NAME [options] [app...]
 
 ${BOLD}COMMANDS${RESET}
-    (default)           Interactive app selection
-    <app>               View logs for specific app(s)
-    serve <apps...>     Start app(s) and capture logs to file
-    run <target> <apps> Run any target for app(s) and capture logs
-    run-many <args...>  Pass arguments directly to nx run-many
+    (default)             Interactive app selection
+    <app>                 View logs for specific app(s)
+    serve <apps...>       Start app(s) and capture logs to file
+    serve --all           Start ALL apps and capture logs to file
+    run <target> <apps>   Run any target for app(s) and capture logs
+    run <target> --all    Run target for ALL apps and capture logs
+    run-many <args...>    Pass arguments directly to nx run-many
     
 ${BOLD}OPTIONS${RESET}
-    -f, --follow        Follow logs in real-time (like tail -f)
-    -n, --lines <N>     Number of lines to show (default: $DEFAULT_LINES)
-    -a, --all           View all app logs combined
-    -s, --search <term> Search for a term in logs
-    -e, --errors        Show only errors and warnings
+    -f, --follow          Follow logs in real-time (like tail -f)
+    -n, --lines <N>       Number of lines to show (default: $DEFAULT_LINES)
+    -a, --all             View all app logs combined
+    -s, --search <term>   Search for a term in logs
+    -e, --errors          Show only errors and warnings
     
-    --daemon            View NX daemon logs
-    --cache             View NX cache/task runner logs
+    --daemon              View NX daemon logs
+    --cache               View NX cache/task runner logs
     
-    --since <time>      Show logs since specified time
-    --until <time>      Show logs until specified time
-    --rotate [app]      Rotate log files (trim old lines)
-    --max-lines <N>     Max lines before rotation (default: $MAX_LOG_LINES)
-    --trim-to <N>       Trim to N lines after rotation (default: $TRIM_TO_LINES)
+    --since <time>        Show logs since specified time
+    --until <time>        Show logs until specified time
+    --rotate [app]        Rotate log files (trim old lines)
+    --max-lines <N>       Max lines before rotation (default: $MAX_LOG_LINES)
+    --trim-to <N>         Trim to N lines after rotation (default: $TRIM_TO_LINES)
     
-    --json              Output logs in JSON format (one object per line)
-    --export <file>     Export filtered logs to a file (use - for stdout)
-    --quiet             Suppress headers and status messages
+    --json                Output logs in JSON format (one object per line)
+    --export <file>       Export filtered logs to a file (use - for stdout)
+    --quiet               Suppress headers and status messages
     
-    --stats             Show log file statistics
-    --apps              List available apps
-    --clean             Remove all log files
-    --stop              Stop all running NX processes
-    --reset             Stop processes and clean logs
-    --init              Create .nxlogsrc config file
-    --config            Show current configuration
-    --demo [apps]       Generate demo logs for testing
+    --stats               Show log file statistics
+    --apps                List available apps
+    --clean               Remove all log files
+    --stop                Stop all running NX processes
+    --reset               Stop processes and clean logs
+    --init                Create .nxlogsrc config file
+    --config              Show current configuration
+    --demo [apps]         Generate demo logs for testing
     
-    --no-color          Disable colored output
-    --theme <name>      Color theme (default, dark, light, minimal, cyberpunk)
+    --no-color            Disable colored output
+    --theme <name>        Color theme (default, dark, light, minimal, cyberpunk)
     
-    -h, --help          Show this help message
-    -v, --version       Show version
+    -h, --help            Show this help message
+    -v, --version         Show version
+
+${BOLD}SERVE & RUN COMMANDS${RESET}
+    The serve and run commands support an --all flag to run all apps:
+    
+        $SCRIPT_NAME serve --all           # Start all apps with logging
+        $SCRIPT_NAME serve app1 app2       # Start specific apps
+        $SCRIPT_NAME run build --all       # Build all apps
+        $SCRIPT_NAME run test app1 app2    # Run tests for specific apps
+    
+    Each app runs in a separate background process with its own log file.
+    Output is streamed to the terminal AND written to logs/nx/<app>.log.
+    Press Ctrl+C to stop all running processes.
+
+${BOLD}RUN-MANY COMMAND${RESET}
+    Pass arguments directly to nx run-many:
+    
+        $SCRIPT_NAME run-many -t serve --all
+        $SCRIPT_NAME run-many -t build --projects=app1,app2
+        $SCRIPT_NAME run-many -t test --parallel=5
 
 ${BOLD}TIME FILTERING${RESET}
     Time expressions support various formats:
@@ -736,19 +757,24 @@ ${BOLD}OUTPUT FORMATS${RESET}
         $SCRIPT_NAME api --export - --json # JSON to stdout
 
 ${BOLD}EXAMPLES${RESET}
-    $SCRIPT_NAME                     # Interactive menu
-    $SCRIPT_NAME api                 # View api app logs
-    $SCRIPT_NAME -f api              # Follow api logs live
-    $SCRIPT_NAME -n 100 api web      # Last 100 lines from api and web
-    $SCRIPT_NAME -s "error" api      # Search for errors in api
-    $SCRIPT_NAME -e -a               # All errors from all apps
-    $SCRIPT_NAME --since "1 hour ago" api    # Logs from last hour
-    $SCRIPT_NAME --since "2025-01-26" api    # Logs since date
-    $SCRIPT_NAME --rotate api        # Rotate api log file
-    $SCRIPT_NAME --stats             # Show log statistics
-    $SCRIPT_NAME --demo              # Generate demo logs
-    $SCRIPT_NAME api --json          # JSON output
-    $SCRIPT_NAME --theme cyberpunk   # Use cyberpunk theme
+    $SCRIPT_NAME                           # Interactive menu
+    $SCRIPT_NAME api                       # View api app logs
+    $SCRIPT_NAME -f api                    # Follow api logs live
+    $SCRIPT_NAME -n 100 api web            # Last 100 lines from api and web
+    $SCRIPT_NAME -s "error" api            # Search for errors in api
+    $SCRIPT_NAME -e -a                     # All errors from all apps
+    $SCRIPT_NAME --since "1 hour ago" api  # Logs from last hour
+    $SCRIPT_NAME --since "2025-01-26" api  # Logs since date
+    $SCRIPT_NAME --rotate api              # Rotate api log file
+    $SCRIPT_NAME --stats                   # Show log statistics
+    $SCRIPT_NAME --demo                    # Generate demo logs
+    $SCRIPT_NAME api --json                # JSON output
+    $SCRIPT_NAME --theme cyberpunk         # Use cyberpunk theme
+    $SCRIPT_NAME serve --all               # Start all apps with logging
+    $SCRIPT_NAME serve api web             # Start specific apps
+    $SCRIPT_NAME run build --all           # Build all apps
+    $SCRIPT_NAME --stop                    # Stop all running NX processes
+    $SCRIPT_NAME --reset                   # Stop processes and clean logs
 
 ${BOLD}THEMES${RESET}
     default     Standard colors for most terminals

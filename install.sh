@@ -14,7 +14,7 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 # Configuration
-REPO_URL="https://github.com/Maximus-Canada/nx-log-viewer"
+REPO_URL="https://github.com/milinbhakta/nx-log-viewer"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 CONFIG_DIR="${CONFIG_DIR:-$HOME/.config/nxlogs}"
 

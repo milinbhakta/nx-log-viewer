@@ -9,7 +9,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # NX Log Viewer - A beautiful CLI tool for viewing NX monorepo logs
 # Version: 1.1.0
-# https://github.com/Maximus-Canada/nx-log-viewer
+# https://github.com/milinbhakta/nx-log-viewer
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -e
@@ -734,7 +734,7 @@ ${BOLD}CONFIGURATION${RESET}
     See: $SCRIPT_NAME --init
 
 ${BOLD}MORE INFO${RESET}
-    https://github.com/Maximus-Canada/nx-log-viewer
+    https://github.com/milinbhakta/nx-log-viewer
 EOF
 }
 

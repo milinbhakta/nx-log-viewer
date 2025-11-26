@@ -2,8 +2,10 @@
 
 A beautiful, powerful CLI tool for viewing and managing logs in any NX monorepo.
 
+[![npm version](https://img.shields.io/npm/v/nx-log-viewer.svg)](https://www.npmjs.com/package/nx-log-viewer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Shell: Bash](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
+[![GitHub](https://img.shields.io/github/stars/milinbhakta/nx-log-viewer?style=social)](https://github.com/milinbhakta/nx-log-viewer)
 
 ## ✨ Features
 
@@ -13,7 +15,7 @@ A beautiful, powerful CLI tool for viewing and managing logs in any NX monorepo.
 - 🔄 **Live Following** - Real-time log tailing with formatting
 - 🔎 **Powerful Search** - Regex search across all logs
 - 🕒 **Time Filtering** - Filter logs by relative or absolute time
-- �� **Log Rotation** - Automatic log trimming with configurable thresholds
+- 🔃 **Log Rotation** - Automatic log trimming with configurable thresholds
 - ⚙️ **Configurable** - Project or user-level configuration
 - 🚀 **Zero Dependencies** - Pure bash, works anywhere
 
@@ -21,12 +23,26 @@ A beautiful, powerful CLI tool for viewing and managing logs in any NX monorepo.
 
 ### Installation
 
-```bash
-# Option 1: Direct download (recommended)
-curl -fsSL https://raw.githubusercontent.com/user/nx-log-viewer/main/install.sh | bash
+#### Option 1: npm (Recommended)
 
-# Option 2: Manual installation
-git clone https://github.com/Maximus-Canada/nx-log-viewer.git
+```bash
+# Install globally
+npm install -g nx-log-viewer
+
+# Or as a dev dependency in your project
+npm install --save-dev nx-log-viewer
+```
+
+#### Option 2: Direct Download
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/milinbhakta/nx-log-viewer/main/install.sh | bash
+```
+
+#### Option 3: Manual Installation
+
+```bash
+git clone https://github.com/milinbhakta/nx-log-viewer.git
 cd nx-log-viewer
 ./install.sh
 ```
@@ -227,6 +243,37 @@ NX Log Viewer searches for logs in this order:
 2. `./logs/nx/`
 3. `./logs/`
 4. `./.nx/logs/`
+
+## 🐳 GitHub Codespaces & DevContainers
+
+Add to your devcontainer's `postCreateCommand`:
+
+```json
+{
+  "postCreateCommand": "npm install -g nx-log-viewer"
+}
+```
+
+Or add convenience scripts to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "logs": "nxlogs",
+    "logs:follow": "nxlogs -f",
+    "logs:errors": "nxlogs --errors",
+    "logs:stats": "nxlogs --stats"
+  }
+}
+```
+
+Then run with:
+
+```bash
+npm run logs
+# or with npx (if installed as dev dependency)
+npx nxlogs
+```
 
 ## 🤝 Contributing
 

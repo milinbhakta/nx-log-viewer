@@ -19,6 +19,13 @@ A beautiful, powerful CLI tool for viewing and managing logs in any NX monorepo.
 - ⚙️ **Configurable** - Project or user-level configuration
 - 🚀 **Zero Dependencies** - Pure bash, works anywhere
 
+## 📋 Prerequisites
+
+- **Bash** 4.0+ (macOS, Linux, WSL, Git Bash)
+- **NX** - Must be installed in your project (`npm install nx` or globally)
+  - Works with `nx` command or falls back to `npx nx`
+  - Uses `nx show projects` for app discovery (NX 16+)
+
 ## 🚀 Quick Start
 
 ### Installation

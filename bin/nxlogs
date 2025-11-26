@@ -406,13 +406,14 @@ rotate_log_file() {
     local trim_to="${3:-$TRIM_TO_LINES}"
     
     if [[ ! -f "$log_file" ]]; then
-        return 0
+        return 1
     fi
     
     local lines
     lines=$(wc -l < "$log_file" 2>/dev/null | tr -d ' ')
     
-    if [[ "$lines" -gt "$max_lines" ]]; then
+    # Rotate if lines >= max_lines (not just greater than)
+    if [[ "$lines" -ge "$max_lines" ]]; then
         local lines_to_remove=$((lines - trim_to))
         log_info "Rotating $log_file: $lines lines -> $trim_to lines (removing $lines_to_remove)"
         
@@ -1120,25 +1121,25 @@ cmd_rotate() {
     local app="${2:-all}"
     local max_lines="${3:-$MAX_LOG_LINES}"
     local trim_to="${4:-$TRIM_TO_LINES}"
+    local log_dir="$project_root/$LOG_DIR"
     
     if [[ "$app" == "all" ]]; then
-        local apps
-        apps=$(get_available_apps "$project_root")
         local rotated=0
         
-        while IFS= read -r current_app; do
-            [[ -z "$current_app" ]] && continue
-            local log_file
-            log_file=$(get_log_file "$project_root" "$current_app")
-            if rotate_log_file "$log_file" "$max_lines" "$trim_to"; then
-                ((rotated++))
-            fi
-        done <<< "$apps"
+        # Find all log files recursively (not just from app discovery)
+        if [[ -d "$log_dir" ]]; then
+            while IFS= read -r log_file; do
+                [[ -z "$log_file" ]] && continue
+                if rotate_log_file "$log_file" "$max_lines" "$trim_to"; then
+                    ((rotated++))
+                fi
+            done < <(find "$log_dir" -name "*$LOG_EXTENSION" -type f 2>/dev/null)
+        fi
         
         if [[ $rotated -gt 0 ]]; then
             log_success "Rotated $rotated log file(s)"
         else
-            log_info "No log files needed rotation"
+            log_info "No log files needed rotation (threshold: $max_lines lines)"
         fi
     else
         local log_file
@@ -1146,7 +1147,9 @@ cmd_rotate() {
         if rotate_log_file "$log_file" "$max_lines" "$trim_to"; then
             log_success "Rotated log file: $log_file"
         else
-            log_info "Log file does not need rotation ($(wc -l < "$log_file" 2>/dev/null || echo 0) lines)"
+            local current_lines
+            current_lines=$(wc -l < "$log_file" 2>/dev/null | tr -d ' ' || echo 0)
+            log_info "Log file does not need rotation ($current_lines lines, threshold: $max_lines)"
         fi
     fi
 }

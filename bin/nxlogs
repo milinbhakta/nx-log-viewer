@@ -1894,10 +1894,15 @@ cmd_run() {
         # Run in background with individual log capturing
         # We use NX_DAEMON=false and NX_INTERACTIVE=false for robustness
         # Apply strip filter before writing to log file AND before display
+        # Use stdbuf or unbuffer for line-buffered output (so file updates in real-time)
         ( 
             NX_DAEMON=false NX_INTERACTIVE=false $nx_cmd run "$app:$target" --output-style=stream "${args[@]}" 2>&1 \
             | eval "$strip_filter" \
-            | tee "$log_file" \
+            | if command -v stdbuf &>/dev/null; then
+                stdbuf -oL tee "$log_file"
+              else
+                tee "$log_file"
+              fi \
             | while IFS= read -r line; do format_follow_line "$line" "$app"; done 
         ) &
     done

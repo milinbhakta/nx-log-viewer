@@ -278,8 +278,28 @@ discover_apps_from_nx() {
     local project_root="$1"
     local apps=()
     
-    # Try to get apps from nx.json
-    if [[ -f "$project_root/nx.json" ]] && command -v jq &> /dev/null; then
+    local nx_cmd="nx"
+    if ! command -v nx &> /dev/null; then nx_cmd="npx nx"; fi
+    
+    # Method 1: Try 'nx show projects' (Modern NX)
+    # We try to filter for apps if possible, but 'show projects' lists all.
+    # 'nx show projects --type app' is supported in newer versions.
+    if $nx_cmd show projects --help &> /dev/null; then
+        local nx_output
+        if nx_output=$($nx_cmd show projects --type app 2>/dev/null); then
+             while IFS= read -r app; do
+                [[ -n "$app" ]] && apps+=("$app")
+             done <<< "$nx_output"
+        elif nx_output=$($nx_cmd show projects 2>/dev/null); then
+             # If --type app fails, return all (might include libs, but better than nothing)
+             while IFS= read -r app; do
+                [[ -n "$app" ]] && apps+=("$app")
+             done <<< "$nx_output"
+        fi
+    fi
+    
+    # Method 2: Try to get apps from nx.json (Legacy/Simple)
+    if [[ ${#apps[@]} -eq 0 ]] && [[ -f "$project_root/nx.json" ]] && command -v jq &> /dev/null; then
         # Try to read projects from nx.json
         local nx_projects
         nx_projects=$(jq -r '.projects // {} | keys[]' "$project_root/nx.json" 2>/dev/null || true)
@@ -290,7 +310,7 @@ discover_apps_from_nx() {
         fi
     fi
     
-    # If no apps found via nx.json, scan directories
+    # Method 3: Scan directories
     if [[ ${#apps[@]} -eq 0 ]]; then
         for app_dir in $APP_DIRS; do
             if [[ -d "$project_root/$app_dir" ]]; then

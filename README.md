@@ -130,6 +130,8 @@ When running multiple apps, `nxlogs` will:
 | `nxlogs --stats` | Show log file statistics |
 | `nxlogs --apps` | List detected apps |
 | `nxlogs --clean` | Remove all log files |
+| `nxlogs --stop` | Stop all running NX processes |
+| `nxlogs --reset` | Stop processes and clean logs |
 | `nxlogs --init` | Create config file in current project |
 | `nxlogs --theme <name>` | Set color theme |
 | `nxlogs --help` | Show help message |

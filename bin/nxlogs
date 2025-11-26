@@ -669,6 +669,8 @@ ${BOLD}OPTIONS${RESET}
     --stats             Show log file statistics
     --apps              List available apps
     --clean             Remove all log files
+    --stop              Stop all running NX processes
+    --reset             Stop processes and clean logs
     --init              Create .nxlogsrc config file
     --config            Show current configuration
     --demo [apps]       Generate demo logs for testing
@@ -996,6 +998,7 @@ cmd_view_all() {
 cmd_clean() {
     local project_root="$1"
     local log_dir="$project_root/$LOG_DIR"
+    local force="$2"
     
     if [[ ! -d "$log_dir" ]]; then
         log_warn "Log directory does not exist: $log_dir"
@@ -1010,16 +1013,53 @@ cmd_clean() {
         return 0
     fi
     
-    echo -e "${YELLOW}This will delete $count log file(s) in $log_dir${RESET}"
-    read -p "Are you sure? [y/N] " -n 1 -r
-    echo ""
-    
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -f "$log_dir"/*"$LOG_EXTENSION"
-        log_success "Cleaned $count log file(s)"
-    else
-        echo "Cancelled"
+    if [[ "$force" != "true" ]]; then
+        echo -e "${YELLOW}This will delete $count log file(s) in $log_dir${RESET}"
+        read -p "Are you sure? [y/N] " -n 1 -r
+        echo ""
+        
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Cancelled"
+            return 0
+        fi
     fi
+
+    rm -f "$log_dir"/*"$LOG_EXTENSION"
+    log_success "Cleaned $count log file(s)"
+}
+
+cmd_stop() {
+    echo -e "${BOLD}${CYAN}═══ Stopping NX Processes ═══${RESET}"
+    
+    local pids=""
+    if command -v pgrep &> /dev/null; then
+        # Match 'nx serve', 'nx run', 'nx run-many'
+        # We exclude 'nxlogs' to avoid killing ourselves if possible
+        pids=$(pgrep -f "nx (serve|run|run-many)" | grep -v "$$" || true)
+    fi
+    
+    if [[ -n "$pids" ]]; then
+        echo -e "${YELLOW}Found running NX processes:${RESET}"
+        # Show details (cross-platform ps is tricky, keeping it simple)
+        ps -p $pids 2>/dev/null || echo "$pids"
+        
+        read -p "Kill these processes? [y/N] " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "$pids" | xargs kill 2>/dev/null || true
+            log_success "Stopped processes"
+        else
+            echo "Cancelled"
+        fi
+    else
+        log_info "No running NX server processes found"
+    fi
+}
+
+cmd_reset() {
+    local project_root="$1"
+    cmd_stop
+    cmd_clean "$project_root" "false"
 }
 
 cmd_rotate() {
@@ -1835,6 +1875,14 @@ main() {
                 cmd="clean"
                 shift
                 ;;
+            --stop)
+                cmd="stop"
+                shift
+                ;;
+            --reset)
+                cmd="reset"
+                shift
+                ;;
             --init)
                 cmd="init"
                 shift
@@ -1886,7 +1934,13 @@ main() {
             cmd_list_apps "$project_root"
             ;;
         clean)
-            cmd_clean "$project_root"
+            cmd_clean "$project_root" "false"
+            ;;
+        stop)
+            cmd_stop
+            ;;
+        reset)
+            cmd_reset "$project_root"
             ;;
         rotate)
             cmd_rotate "$project_root" "$rotate_app" "$max_lines" "$trim_to"

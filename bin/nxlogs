@@ -57,6 +57,23 @@ HIGHLIGHT_SUCCESS="${HIGHLIGHT_SUCCESS:-success|completed|ready|started|listenin
 HIGHLIGHT_DEBUG="${HIGHLIGHT_DEBUG:-debug|trace|verbose}"
 IGNORE_PATTERNS="${IGNORE_PATTERNS:-}"
 
+# Log stripping/formatting
+# Regex pattern to strip from log lines (e.g., remove Dapr/NX prefixes)
+# Example: STRIP_PATTERN='^[a-z]+: == APP == [0-9-]+ [0-9:,]+ - [A-Za-z]+ - (INFO|DEBUG|WARNING|ERROR) - '
+STRIP_PATTERN="${STRIP_PATTERN:-}"
+# Common presets (set STRIP_PRESET in .nxlogsrc)
+# dapr: Strips 'appname: == APP == timestamp - Logger - LEVEL - ' prefix
+# nx: Strips '[appname] ' prefix
+STRIP_PRESET="${STRIP_PRESET:-}"
+# Strip N characters from front of each line
+STRIP_FRONT="${STRIP_FRONT:-0}"
+# Strip N characters from back of each line  
+STRIP_BACK="${STRIP_BACK:-0}"
+# Strip text before a delimiter (e.g., ' - ' to remove everything before first ' - ')
+STRIP_BEFORE="${STRIP_BEFORE:-}"
+# Strip text after a delimiter (e.g., ' | ' to remove everything after first ' | ')
+STRIP_AFTER="${STRIP_AFTER:-}"
+
 # Log file naming
 LOG_EXTENSION="${LOG_EXTENSION:-.log}"
 # Note: We set the pattern without brace expansion risk
@@ -533,6 +550,65 @@ filter_by_time() {
 # Log Formatting
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Strip unwanted prefixes from log lines based on STRIP_PATTERN or STRIP_PRESET
+strip_log_prefix() {
+    local line="$1"
+    
+    # Apply preset patterns
+    case "$STRIP_PRESET" in
+        dapr)
+            # Strips: "appname: == APP == 2025-11-26 17:21:32,773 - LoggerName - INFO - "
+            line=$(echo "$line" | sed -E 's/^[a-zA-Z0-9_-]+: == APP == [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]+ - [A-Za-z._]+ - (INFO|DEBUG|WARNING|ERROR|CRITICAL) - //')
+            ;;
+        nx)
+            # Strips: "[appname] " prefix
+            line=$(echo "$line" | sed -E 's/^\[[a-zA-Z0-9_-]+\] //')
+            ;;
+        minimal)
+            # Strips: timestamp and log level, keeps just the message
+            # Handles: "2025-11-26 17:21:32,773 - LoggerName - INFO - message"
+            line=$(echo "$line" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]+ - [A-Za-z._]+ - (INFO|DEBUG|WARNING|ERROR|CRITICAL) - //')
+            ;;
+    esac
+    
+    # Apply custom strip pattern if set
+    if [[ -n "$STRIP_PATTERN" ]]; then
+        line=$(echo "$line" | sed -E "s/$STRIP_PATTERN//")
+    fi
+    
+    # Strip N characters from front
+    if [[ "$STRIP_FRONT" -gt 0 ]] 2>/dev/null; then
+        line="${line:$STRIP_FRONT}"
+    fi
+    
+    # Strip N characters from back
+    if [[ "$STRIP_BACK" -gt 0 ]] 2>/dev/null; then
+        local len=${#line}
+        local new_len=$((len - STRIP_BACK))
+        if [[ $new_len -gt 0 ]]; then
+            line="${line:0:$new_len}"
+        else
+            line=""
+        fi
+    fi
+    
+    # Strip everything before a delimiter
+    if [[ -n "$STRIP_BEFORE" ]]; then
+        if [[ "$line" == *"$STRIP_BEFORE"* ]]; then
+            line="${line#*$STRIP_BEFORE}"
+        fi
+    fi
+    
+    # Strip everything after a delimiter
+    if [[ -n "$STRIP_AFTER" ]]; then
+        if [[ "$line" == *"$STRIP_AFTER"* ]]; then
+            line="${line%%$STRIP_AFTER*}"
+        fi
+    fi
+    
+    echo "$line"
+}
+
 colorize_line() {
     local line="$1"
     local app="$2"
@@ -542,6 +618,13 @@ colorize_line() {
     if [[ -z "$line" ]]; then
         echo ""
         return
+    fi
+    
+    # Apply strip pattern if configured
+    if [[ -n "$STRIP_PATTERN" ]] || [[ -n "$STRIP_PRESET" ]] || 
+       [[ "$STRIP_FRONT" -gt 0 ]] 2>/dev/null || [[ "$STRIP_BACK" -gt 0 ]] 2>/dev/null ||
+       [[ -n "$STRIP_BEFORE" ]] || [[ -n "$STRIP_AFTER" ]]; then
+        line=$(strip_log_prefix "$line")
     fi
     
     # Detect log level and colorize
@@ -700,6 +783,8 @@ ${BOLD}OPTIONS${RESET}
     
     --no-color            Disable colored output
     --theme <name>        Color theme (default, dark, light, minimal, cyberpunk)
+    --strip <preset>      Strip log prefixes (presets: dapr, nx, minimal)
+    --strip-pattern <rx>  Custom regex pattern to strip from log lines
     
     -h, --help            Show this help message
     -v, --version         Show version
@@ -715,6 +800,31 @@ ${BOLD}SERVE & RUN COMMANDS${RESET}
     Each app runs in a separate background process with its own log file.
     Output is streamed to the terminal AND written to logs/nx/<app>.log.
     Press Ctrl+C to stop all running processes.
+
+${BOLD}LOG STRIPPING${RESET}
+    Remove verbose prefixes from logs for cleaner output:
+    
+    Presets:
+        dapr      Strips: "app: == APP == timestamp - Logger - LEVEL - "
+        nx        Strips: "[appname] " prefix
+        minimal   Strips: "timestamp - Logger - LEVEL - "
+    
+    Character-based stripping:
+        STRIP_FRONT=N   Strip N characters from the front of each line
+        STRIP_BACK=N    Strip N characters from the back of each line
+    
+    Examples:
+        $SCRIPT_NAME flow --strip dapr       # Clean Dapr logs
+        $SCRIPT_NAME api --strip nx          # Clean NX prefixes
+        $SCRIPT_NAME flow --strip-pattern '^flow: == APP == '
+    
+    Configure in .nxlogsrc:
+        STRIP_PRESET=dapr
+        # Or custom regex:
+        STRIP_PATTERN='^[a-z]+: == APP == '
+        # Character-based:
+        STRIP_FRONT=10   # Remove first 10 characters
+        STRIP_BACK=5     # Remove last 5 characters
 
 ${BOLD}RUN-MANY COMMAND${RESET}
     Pass arguments directly to nx run-many:
@@ -2012,6 +2122,14 @@ main() {
             --no-color)
                 COLORIZE="false"
                 shift
+                ;;
+            --strip)
+                STRIP_PRESET="$2"
+                shift 2
+                ;;
+            --strip-pattern)
+                STRIP_PATTERN="$2"
+                shift 2
                 ;;
             --theme)
                 THEME="$2"

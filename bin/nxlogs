@@ -1550,7 +1550,11 @@ process_multiplexed_logs() {
             # Format for display
             format_follow_line "$line" "$app_name"
         else
-            # No app detected, just print
+            # No app detected
+            # Write to a combined log file so we don't lose data if regex fails
+            echo "$line" >> "$log_dir/_combined.log"
+            
+            # Just print to stdout
             echo "$line"
         fi
     done
@@ -1569,7 +1573,8 @@ cmd_run_many() {
     
     # Force stream output to ensure we get [app] prefixes
     # Set NX_INTERACTIVE=false to prevent spinner/dynamic output issues
-    NX_INTERACTIVE=false $nx_cmd run-many --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
+    # Set NX_DAEMON=false to avoid daemon communication issues in some envs
+    NX_DAEMON=false NX_INTERACTIVE=false $nx_cmd run-many --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
 }
 
 cmd_run() {
@@ -1601,28 +1606,40 @@ cmd_run() {
     local nx_cmd="nx"
     if ! command -v nx &> /dev/null; then nx_cmd="npx nx"; fi
     
-    if [[ ${#apps[@]} -eq 1 ]]; then
-        # Single app mode
-        local app="${apps[0]}"
+    # Create log directory
+    local log_dir="$project_root/$LOG_DIR"
+    mkdir -p "$log_dir"
+    
+    echo -e "${GRAY}Logs will be written to: $log_dir${RESET}\n"
+    
+    # Trap to kill background processes on exit/interrupt
+    trap 'kill $(jobs -p) 2>/dev/null' EXIT SIGINT SIGTERM
+    
+    for app in "${apps[@]}"; do
         local log_file
         log_file=$(get_log_file "$project_root" "$app")
         mkdir -p "$(dirname "$log_file")"
         
-        echo -e "${GRAY}Logs will be written to: $log_file${RESET}\n"
+        # Clear existing log file
+        > "$log_file"
         
-        $nx_cmd run "$app:$target" "${args[@]}" 2>&1 | tee -a "$log_file" | while IFS= read -r line; do
-            format_follow_line "$line" "$app"
-        done
-    else
-        # Multi app mode
-        local app_list
-        app_list=$(IFS=,; echo "${apps[*]}")
+        echo -e "${GREEN}Starting $app${RESET} → $log_file"
         
-        echo -e "${GRAY}Logs will be written to individual app log files in $project_root/$LOG_DIR${RESET}\n"
-        
-        # Use run-many with forced stream output
-        NX_INTERACTIVE=false $nx_cmd run-many --target="$target" --projects="$app_list" --output-style=stream "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
-    fi
+        # Run in background with individual log capturing
+        # We use NX_DAEMON=false and NX_INTERACTIVE=false for robustness
+        ( 
+            NX_DAEMON=false NX_INTERACTIVE=false $nx_cmd run "$app:$target" --output-style=stream "${args[@]}" 2>&1 \
+            | tee "$log_file" \
+            | while IFS= read -r line; do format_follow_line "$line" "$app"; done 
+        ) &
+    done
+    
+    echo ""
+    echo -e "${BOLD}✅ All apps starting... Output streaming below (Ctrl+C to stop all)${RESET}"
+    echo -e "${BORDER_COLOR:-$GRAY}═══════════════════════════════════════════════════════════════════${RESET}"
+    
+    # Wait for all background processes
+    wait
 }
 
 cmd_serve() {
@@ -1726,9 +1743,13 @@ main() {
         # Collect apps until we hit a flag or --
         local serve_apps=()
         local serve_args=()
+        local use_all="false"
         
         while [[ $# -gt 0 ]]; do
-            if [[ "$1" == -* ]]; then
+            if [[ "$1" == "--all" ]]; then
+                use_all="true"
+                shift
+            elif [[ "$1" == -* ]]; then
                 serve_args+=("$@")
                 break
             else
@@ -1745,6 +1766,17 @@ main() {
         fi
         load_config "$project_root"
         
+        if [[ "$use_all" == "true" ]]; then
+            # Fetch all apps
+            local all_apps
+            all_apps=$(get_available_apps "$project_root")
+            if [[ -n "$all_apps" ]]; then
+                while IFS= read -r app; do
+                    [[ -n "$app" ]] && serve_apps+=("$app")
+                done <<< "$all_apps"
+            fi
+        fi
+        
         cmd_serve "$project_root" "${serve_apps[@]}" "${serve_args[@]}"
         exit $?
     elif [[ "$1" == "run" ]]; then
@@ -1755,9 +1787,13 @@ main() {
         # Collect apps until we hit a flag or --
         local run_apps=()
         local run_args=()
+        local use_all="false"
         
         while [[ $# -gt 0 ]]; do
-            if [[ "$1" == -* ]]; then
+            if [[ "$1" == "--all" ]]; then
+                use_all="true"
+                shift
+            elif [[ "$1" == -* ]]; then
                 run_args+=("$@")
                 break
             else
@@ -1773,6 +1809,17 @@ main() {
             exit 1
         fi
         load_config "$project_root"
+        
+        if [[ "$use_all" == "true" ]]; then
+            # Fetch all apps
+            local all_apps
+            all_apps=$(get_available_apps "$project_root")
+            if [[ -n "$all_apps" ]]; then
+                while IFS= read -r app; do
+                    [[ -n "$app" ]] && run_apps+=("$app")
+                done <<< "$all_apps"
+            fi
+        fi
         
         cmd_run "$project_root" "$target" "${run_apps[@]}" "${run_args[@]}"
         exit $?

@@ -59,6 +59,12 @@ nxlogs
 # View specific app logs
 nxlogs my-app
 
+# Start app and capture logs (Wrapper Mode)
+nxlogs serve my-app
+
+# View NX Daemon logs
+nxlogs --daemon
+
 # Follow logs in real-time
 nxlogs -f my-app
 
@@ -69,12 +75,32 @@ nxlogs --errors
 nxlogs --stats
 ```
 
+## 🚀 Serving Apps & Capturing Logs
+
+NX Log Viewer can act as a wrapper around `nx serve` to automatically capture output to log files:
+
+```bash
+# Start 'api' and capture logs
+nxlogs serve api
+
+# Pass arguments to the underlying command
+nxlogs serve api --port=4000 --host=0.0.0.0
+```
+
+This will:
+1. Run `nx serve api`
+2. Pipe output to `logs/nx/api.log`
+3. Show formatted output in your terminal simultaneously
+
 ## 📖 Commands
 
 | Command | Description |
 |---------|-------------|
 | `nxlogs` | Interactive app selection menu |
 | `nxlogs <app>` | View logs for specific app |
+| `nxlogs serve <app>` | Start app and capture logs to file |
+| `nxlogs --daemon` | View NX Daemon logs |
+| `nxlogs --cache` | View recent NX task runner logs |
 | `nxlogs -f, --follow` | Follow logs in real-time |
 | `nxlogs -s, --search <term>` | Search logs for a term |
 | `nxlogs -e, --errors` | Show only errors and warnings |

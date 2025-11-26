@@ -642,13 +642,17 @@ ${BOLD}USAGE${RESET}
 ${BOLD}COMMANDS${RESET}
     (default)           Interactive app selection
     <app>               View logs for specific app(s)
-
+    serve <app>         Start app and capture logs to file
+    
 ${BOLD}OPTIONS${RESET}
     -f, --follow        Follow logs in real-time (like tail -f)
     -n, --lines <N>     Number of lines to show (default: $DEFAULT_LINES)
     -a, --all           View all app logs combined
     -s, --search <term> Search for a term in logs
     -e, --errors        Show only errors and warnings
+    
+    --daemon            View NX daemon logs
+    --cache             View NX cache/task runner logs
     
     --since <time>      Show logs since specified time
     --until <time>      Show logs until specified time
@@ -1461,6 +1465,106 @@ cmd_view_json() {
     done
 }
 
+cmd_serve() {
+    local project_root="$1"
+    local app="$2"
+    shift 2
+    local args=("$@")
+    
+    if [[ -z "$app" ]]; then
+        log_error "Please specify an app to serve"
+        return 1
+    fi
+    
+    local log_file
+    log_file=$(get_log_file "$project_root" "$app")
+    local log_dir
+    log_dir=$(dirname "$log_file")
+    
+    mkdir -p "$log_dir"
+    
+    echo -e "${BOLD}${CYAN}═══ Serving $app ═══${RESET}"
+    echo -e "${GRAY}Logs will be written to: $log_file${RESET}\n"
+    
+    # Start NX serve and pipe to log file while also showing in terminal
+    # We use 'tee' to split the output
+    if command -v nx &> /dev/null; then
+        nx serve "$app" "${args[@]}" 2>&1 | tee -a "$log_file" | while IFS= read -r line; do
+            format_follow_line "$line" "$app"
+        done
+    else
+        # Try npx if nx is not in path
+        npx nx serve "$app" "${args[@]}" 2>&1 | tee -a "$log_file" | while IFS= read -r line; do
+            format_follow_line "$line" "$app"
+        done
+    fi
+}
+
+cmd_daemon() {
+    local project_root="$1"
+    local follow="$2"
+    local lines="${3:-$DEFAULT_LINES}"
+    
+    local daemon_log="$project_root/.nx/daemon.log"
+    
+    # Try common locations if not found
+    if [[ ! -f "$daemon_log" ]]; then
+        # Check for global daemon log (macOS/Linux)
+        if [[ -f "/tmp/nx-daemon.log" ]]; then
+            daemon_log="/tmp/nx-daemon.log"
+        elif [[ -f "$HOME/.nx/cache/daemon.log" ]]; then
+            daemon_log="$HOME/.nx/cache/daemon.log"
+        fi
+    fi
+    
+    if [[ ! -f "$daemon_log" ]]; then
+        log_error "NX Daemon log not found"
+        return 1
+    fi
+    
+    echo -e "${BOLD}${CYAN}═══ NX Daemon Logs ═══${RESET}"
+    echo -e "${GRAY}$daemon_log${RESET}\n"
+    
+    if [[ "$follow" == "true" ]]; then
+        tail -f "$daemon_log" | while IFS= read -r line; do
+            colorize_line "$line" "daemon" "${GRAY}"
+        done
+    else
+        tail -n "$lines" "$daemon_log" | while IFS= read -r line; do
+            colorize_line "$line" "daemon" "${GRAY}"
+        done
+    fi
+}
+
+cmd_cache() {
+    local project_root="$1"
+    local follow="$2"
+    local lines="${3:-$DEFAULT_LINES}"
+    
+    # Look for cache logs or task runner logs
+    # This is tricky as NX structure varies, but we'll check common spots
+    local cache_dir="$project_root/.nx/cache"
+    
+    if [[ ! -d "$cache_dir" ]]; then
+        log_error "NX Cache directory not found: $cache_dir"
+        return 1
+    fi
+    
+    echo -e "${BOLD}${CYAN}═══ NX Cache/Task Logs ═══${RESET}"
+    echo -e "${GRAY}Listing recent task logs in $cache_dir${RESET}\n"
+    
+    # Find most recent terminal-outputs
+    find "$cache_dir" -name "terminal-output" -type f -print0 | xargs -0 ls -lt | head -n 5 | while read -r line; do
+        local file
+        file=$(echo "$line" | awk '{print $9}')
+        local hash
+        hash=$(basename "$(dirname "$file")")
+        echo -e "${BOLD}Task Hash: $hash${RESET}"
+        cat "$file"
+        echo -e "${GRAY}────────────────────────────────${RESET}"
+    done
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1483,6 +1587,27 @@ main() {
     local export_file=""
     local quiet="false"
     local demo_apps=""
+    
+    # Check for 'serve' command first as it consumes remaining args
+    if [[ "$1" == "serve" ]]; then
+        cmd="serve"
+        shift
+        local serve_app="$1"
+        shift
+        # Remaining args are passed to nx serve
+        local serve_args=("$@")
+        
+        # Setup colors and config before running
+        setup_colors
+        if ! project_root=$(find_project_root); then
+            log_error "Not in an NX workspace"
+            exit 1
+        fi
+        load_config "$project_root"
+        
+        cmd_serve "$project_root" "$serve_app" "${serve_args[@]}"
+        exit $?
+    fi
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1512,6 +1637,14 @@ main() {
                 ;;
             -e|--errors)
                 errors_only="true"
+                shift
+                ;;
+            --daemon)
+                cmd="daemon"
+                shift
+                ;;
+            --cache)
+                cmd="cache"
                 shift
                 ;;
             --since)
@@ -1637,6 +1770,12 @@ main() {
             ;;
         demo)
             cmd_demo "$project_root" "$demo_apps"
+            ;;
+        daemon)
+            cmd_daemon "$project_root" "$follow" "$lines"
+            ;;
+        cache)
+            cmd_cache "$project_root" "$follow" "$lines"
             ;;
         *)
             # Handle export mode

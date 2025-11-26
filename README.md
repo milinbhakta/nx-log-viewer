@@ -92,6 +92,10 @@ nxlogs serve api --port=4000 --host=0.0.0.0
 # Run any target and capture logs
 nxlogs run build api web
 nxlogs run test api
+
+# Use run-many directly
+nxlogs run-many -t serve --all
+nxlogs run-many -t build --projects=api,web --parallel=2
 ```
 
 When running multiple apps, `nxlogs` will:
@@ -107,6 +111,7 @@ When running multiple apps, `nxlogs` will:
 | `nxlogs <app>` | View logs for specific app |
 | `nxlogs serve <apps...>` | Start app(s) and capture logs to file |
 | `nxlogs run <target> <apps...>` | Run target for app(s) and capture logs |
+| `nxlogs run-many <args...>` | Pass arguments directly to nx run-many |
 | `nxlogs --daemon` | View NX Daemon logs |
 | `nxlogs --cache` | View recent NX task runner logs |
 | `nxlogs -f, --follow` | Follow logs in real-time |

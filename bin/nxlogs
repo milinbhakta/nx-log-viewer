@@ -644,6 +644,7 @@ ${BOLD}COMMANDS${RESET}
     <app>               View logs for specific app(s)
     serve <apps...>     Start app(s) and capture logs to file
     run <target> <apps> Run any target for app(s) and capture logs
+    run-many <args...>  Pass arguments directly to nx run-many
     
 ${BOLD}OPTIONS${RESET}
     -f, --follow        Follow logs in real-time (like tail -f)
@@ -1502,6 +1503,20 @@ process_multiplexed_logs() {
     done
 }
 
+cmd_run_many() {
+    local project_root="$1"
+    shift
+    local args=("$@")
+    
+    echo -e "${BOLD}${CYAN}═══ Running run-many ═══${RESET}"
+    echo -e "${GRAY}Logs will be written to individual app log files in $project_root/$LOG_DIR${RESET}\n"
+    
+    local nx_cmd="nx"
+    if ! command -v nx &> /dev/null; then nx_cmd="npx nx"; fi
+    
+    $nx_cmd run-many "${args[@]}" 2>&1 | process_multiplexed_logs "$project_root"
+}
+
 cmd_run() {
     local project_root="$1"
     local target="$2"
@@ -1705,6 +1720,21 @@ main() {
         load_config "$project_root"
         
         cmd_run "$project_root" "$target" "${run_apps[@]}" "${run_args[@]}"
+        exit $?
+    elif [[ "$1" == "run-many" ]]; then
+        cmd="run-many"
+        shift
+        local args=("$@")
+        
+        # Setup colors and config before running
+        setup_colors
+        if ! project_root=$(find_project_root); then
+            log_error "Not in an NX workspace"
+            exit 1
+        fi
+        load_config "$project_root"
+        
+        cmd_run_many "$project_root" "${args[@]}"
         exit $?
     fi
     

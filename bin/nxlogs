@@ -40,6 +40,20 @@ APP_DIRS="${APP_DIRS:-apps packages libs}"
 DEFAULT_LINES="${DEFAULT_LINES:-50}"
 PAGER="${PAGER:-less -R}"
 
+# Auto-detect terminal width for wrapping
+if [[ -t 1 ]]; then
+    TERM_WIDTH=$(tput cols 2>/dev/null || echo 0)
+    if [[ "$TERM_WIDTH" -gt 2 ]]; then
+        # Default to terminal width - 2 for safety
+        DEFAULT_WRAP_WIDTH=$((TERM_WIDTH - 2))
+    else
+        DEFAULT_WRAP_WIDTH=0
+    fi
+else
+    DEFAULT_WRAP_WIDTH=0
+fi
+WRAP_WIDTH="${WRAP_WIDTH:-$DEFAULT_WRAP_WIDTH}"
+
 # Log rotation
 ENABLE_ROTATION="${ENABLE_ROTATION:-false}"
 MAX_LOG_LINES="${MAX_LOG_LINES:-7000}"
@@ -703,6 +717,12 @@ colorize_line() {
         line=$(strip_log_prefix "$line")
     fi
     
+    # Apply wrapping if configured
+    if [[ "$WRAP_WIDTH" -gt 0 ]] 2>/dev/null; then
+        # Wrap and indent continuation lines
+        line=$(echo "$line" | fold -s -w "$WRAP_WIDTH" | sed '2,$s/^/    /')
+    fi
+    
     # Detect log level and colorize
     local line_lower
     line_lower=$(echo "$line" | tr '[:upper:]' '[:lower:]')
@@ -861,14 +881,17 @@ ${BOLD}OPTIONS${RESET}
     --theme <name>        Color theme (default, dark, light, minimal, cyberpunk)
     --strip <preset>      Strip log prefixes (presets: dapr, nx, minimal)
     --strip-pattern <rx>  Custom regex pattern to strip from log lines
+    --wrap <width>        Wrap log lines to specified width
     
     -h, --help            Show this help message
     -v, --version         Show version
 
 ${BOLD}SERVE & RUN COMMANDS${RESET}
     The serve and run commands support an --all flag to run all apps:
+    The serve command also supports --exclude to skip selected apps.
     
         $SCRIPT_NAME serve --all           # Start all apps with logging
+        $SCRIPT_NAME serve --all --exclude app1,app2
         $SCRIPT_NAME serve app1 app2       # Start specific apps
         $SCRIPT_NAME run build --all       # Build all apps
         $SCRIPT_NAME run test app1 app2    # Run tests for specific apps
@@ -958,6 +981,7 @@ ${BOLD}EXAMPLES${RESET}
     $SCRIPT_NAME api --json                # JSON output
     $SCRIPT_NAME --theme cyberpunk         # Use cyberpunk theme
     $SCRIPT_NAME serve --all               # Start all apps with logging
+    $SCRIPT_NAME serve --all --exclude api # Start all except api
     $SCRIPT_NAME serve api web             # Start specific apps
     $SCRIPT_NAME run build --all           # Build all apps
     $SCRIPT_NAME --stop                    # Stop all running NX processes
@@ -1894,15 +1918,10 @@ cmd_run() {
         # Run in background with individual log capturing
         # We use NX_DAEMON=false and NX_INTERACTIVE=false for robustness
         # Apply strip filter before writing to log file AND before display
-        # Use stdbuf or unbuffer for line-buffered output (so file updates in real-time)
         ( 
             NX_DAEMON=false NX_INTERACTIVE=false $nx_cmd run "$app:$target" --output-style=stream "${args[@]}" 2>&1 \
             | eval "$strip_filter" \
-            | if command -v stdbuf &>/dev/null; then
-                stdbuf -oL tee "$log_file"
-              else
-                tee "$log_file"
-              fi \
+            | tee "$log_file" \
             | while IFS= read -r line; do format_follow_line "$line" "$app"; done 
         ) &
     done
@@ -2017,10 +2036,26 @@ main() {
         local serve_apps=()
         local serve_args=()
         local use_all="false"
+        local exclude_csv=""
         
         while [[ $# -gt 0 ]]; do
             if [[ "$1" == "--all" ]]; then
                 use_all="true"
+                shift
+            elif [[ "$1" == "--exclude" ]]; then
+                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
+                    log_error "--exclude requires a comma-separated app list (e.g. --exclude app1,app2)"
+                    exit 1
+                fi
+                exclude_csv+="${exclude_csv:+,}$2"
+                shift 2
+            elif [[ "$1" == --exclude=* ]]; then
+                local exclude_value="${1#*=}"
+                if [[ -z "$exclude_value" ]]; then
+                    log_error "--exclude requires a comma-separated app list (e.g. --exclude=app1,app2)"
+                    exit 1
+                fi
+                exclude_csv+="${exclude_csv:+,}$exclude_value"
                 shift
             elif [[ "$1" == -* ]]; then
                 serve_args+=("$@")
@@ -2048,6 +2083,26 @@ main() {
                     [[ -n "$app" ]] && serve_apps+=("$app")
                 done <<< "$all_apps"
             fi
+        fi
+
+        if [[ -n "$exclude_csv" ]]; then
+            exclude_csv="$(echo "$exclude_csv" | tr -d '[:space:]')"
+            local filtered_apps=()
+            local excluded_label=""
+
+            for app in "${serve_apps[@]}"; do
+                if [[ ",$exclude_csv," == *",$app,"* ]]; then
+                    excluded_label+="${excluded_label:+, }$app"
+                    continue
+                fi
+                filtered_apps+=("$app")
+            done
+
+            if [[ -n "$excluded_label" ]]; then
+                log_info "Excluding app(s): $excluded_label"
+            fi
+
+            serve_apps=("${filtered_apps[@]}")
         fi
         
         cmd_serve "$project_root" "${serve_apps[@]}" "${serve_args[@]}"
@@ -2236,6 +2291,10 @@ main() {
                 ;;
             --strip-pattern)
                 STRIP_PATTERN="$2"
+                shift 2
+                ;;
+            --wrap)
+                WRAP_WIDTH="$2"
                 shift 2
                 ;;
             --theme)

@@ -93,6 +93,9 @@ nxlogs serve api
 # Start multiple apps (uses nx run-many)
 nxlogs serve api web
 
+# Start all apps except selected ones
+nxlogs serve --all --exclude api,web
+
 # Pass arguments to the underlying command
 nxlogs serve api --port=4000 --host=0.0.0.0
 
@@ -117,6 +120,7 @@ When running multiple apps, `nxlogs` will:
 | `nxlogs` | Interactive app selection menu |
 | `nxlogs <app>` | View logs for specific app |
 | `nxlogs serve <apps...>` | Start app(s) and capture logs to file |
+| `nxlogs serve --all --exclude <apps>` | Start all apps except excluded app(s) |
 | `nxlogs run <target> <apps...>` | Run target for app(s) and capture logs |
 | `nxlogs run-many <args...>` | Pass arguments directly to nx run-many |
 | `nxlogs --daemon` | View NX Daemon logs |

@@ -64,6 +64,11 @@ JSON_OUTPUT="${JSON_OUTPUT:-false}"
 EXPORT_FILE="${EXPORT_FILE:-}"
 QUIET_MODE="${QUIET_MODE:-false}"
 
+# Per-invocation app discovery cache
+AVAILABLE_APPS_CACHE_ROOT=""
+AVAILABLE_APPS_CACHE_READY="false"
+AVAILABLE_APPS_CACHE_VALUE=""
+
 # Pattern matching
 HIGHLIGHT_ERRORS="${HIGHLIGHT_ERRORS:-error|exception|failed|fatal|critical}"
 HIGHLIGHT_WARNINGS="${HIGHLIGHT_WARNINGS:-warn|warning|deprecated}"
@@ -279,7 +284,8 @@ find_project_root() {
             echo "$dir"
             return 0
         fi
-        dir="$(dirname "$dir")"
+        dir="${dir%/*}"
+        [[ -z "$dir" ]] && dir="/"
     done
     return 1
 }
@@ -348,7 +354,8 @@ discover_apps_from_nx() {
                 for app_path in "$project_root/$app_dir"/*/; do
                     if [[ -d "$app_path" ]]; then
                         local app_name
-                        app_name=$(basename "$app_path")
+                        app_name="${app_path%/}"
+                        app_name="${app_name##*/}"
                         # Check if it has a project.json or is a valid project
                         if [[ -f "$app_path/project.json" ]] || [[ -f "$app_path/package.json" ]]; then
                             apps+=("$app_name")
@@ -371,7 +378,8 @@ discover_apps_from_logs() {
         for log_file in "$log_dir"/*"$LOG_EXTENSION"; do
             if [[ -f "$log_file" ]]; then
                 local app_name
-                app_name=$(basename "$log_file" "$LOG_EXTENSION")
+                app_name="${log_file##*/}"
+                app_name="${app_name%$LOG_EXTENSION}"
                 apps+=("$app_name")
             fi
         done
@@ -383,26 +391,35 @@ discover_apps_from_logs() {
 get_available_apps() {
     local project_root="$1"
     local log_dir="$project_root/$LOG_DIR"
+
+    if [[ "$AVAILABLE_APPS_CACHE_READY" == "true" ]] && [[ "$AVAILABLE_APPS_CACHE_ROOT" == "$project_root" ]]; then
+        [[ -n "$AVAILABLE_APPS_CACHE_VALUE" ]] && printf '%s\n' "$AVAILABLE_APPS_CACHE_VALUE"
+        return
+    fi
+
+    local available_apps=""
     
     # If APPS is set in config, use that
     if [[ -n "$APPS" ]]; then
-        echo "$APPS" | tr ' ' '\n'
-        return
+        available_apps=$(echo "$APPS" | tr ' ' '\n')
+    else
+        # First try to find apps from log files
+        local log_apps
+        log_apps=$(discover_apps_from_logs "$log_dir")
+
+        if [[ -n "$log_apps" ]]; then
+            available_apps="$log_apps"
+        elif [[ "$AUTO_DISCOVER" == "true" ]]; then
+            # Fallback to NX discovery
+            available_apps=$(discover_apps_from_nx "$project_root")
+        fi
     fi
-    
-    # First try to find apps from log files
-    local log_apps
-    log_apps=$(discover_apps_from_logs "$log_dir")
-    
-    if [[ -n "$log_apps" ]]; then
-        echo "$log_apps"
-        return
-    fi
-    
-    # Fallback to NX discovery
-    if [[ "$AUTO_DISCOVER" == "true" ]]; then
-        discover_apps_from_nx "$project_root"
-    fi
+
+    AVAILABLE_APPS_CACHE_ROOT="$project_root"
+    AVAILABLE_APPS_CACHE_READY="true"
+    AVAILABLE_APPS_CACHE_VALUE="$available_apps"
+
+    [[ -n "$available_apps" ]] && printf '%s\n' "$available_apps"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -506,6 +523,22 @@ parse_relative_time() {
     return 1
 }
 
+# Format epoch seconds to sortable datetime "YYYY-MM-DD HH:MM:SS"
+format_epoch_datetime() {
+    local epoch="$1"
+
+    local formatted
+    if formatted=$(date -d "@$epoch" +"%Y-%m-%d %H:%M:%S" 2>/dev/null); then
+        echo "$formatted"
+        return 0
+    elif formatted=$(date -r "$epoch" +"%Y-%m-%d %H:%M:%S" 2>/dev/null); then
+        echo "$formatted"
+        return 0
+    fi
+
+    return 1
+}
+
 # Extract timestamp from log line (tries common formats)
 extract_timestamp() {
     local line="$1"
@@ -536,20 +569,45 @@ filter_by_time() {
     local since="$1"
     local until="$2"
     local line
+
+    local since_fmt=""
+    local until_fmt=""
+
+    if [[ -n "$since" ]]; then
+        since_fmt=$(format_epoch_datetime "$since" 2>/dev/null || true)
+    fi
+    if [[ -n "$until" ]]; then
+        until_fmt=$(format_epoch_datetime "$until" 2>/dev/null || true)
+    fi
     
     while IFS= read -r line; do
-        local ts
-        if ts=$(extract_timestamp "$line"); then
+        if [[ "$line" =~ ([0-9]{4}-[0-9]{2}-[0-9]{2})[T[:space:]]([0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
+            local ts_fmt="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
             local show=true
-            
+
+            if [[ -n "$since_fmt" ]] && [[ "$ts_fmt" < "$since_fmt" ]]; then
+                show=false
+            fi
+
+            if [[ -n "$until_fmt" ]] && [[ "$ts_fmt" > "$until_fmt" ]]; then
+                show=false
+            fi
+
+            if [[ "$show" == "true" ]]; then
+                echo "$line"
+            fi
+        elif [[ "$line" =~ ^([0-9]{10}) ]]; then
+            local ts="${BASH_REMATCH[1]}"
+            local show=true
+
             if [[ -n "$since" ]] && [[ "$ts" -lt "$since" ]]; then
                 show=false
             fi
-            
+
             if [[ -n "$until" ]] && [[ "$ts" -gt "$until" ]]; then
                 show=false
             fi
-            
+
             if [[ "$show" == "true" ]]; then
                 echo "$line"
             fi
@@ -640,6 +698,31 @@ has_strip_config() {
     [[ -n "$STRIP_BEFORE" ]] || [[ -n "$STRIP_AFTER" ]]
 }
 
+# Check whether a line matches IGNORE_PATTERNS (case-insensitive regex)
+should_ignore_line() {
+    local line="$1"
+
+    [[ -z "$IGNORE_PATTERNS" ]] && return 1
+
+    local had_nocasematch=0
+    if shopt -q nocasematch; then
+        had_nocasematch=1
+    else
+        shopt -s nocasematch
+    fi
+
+    local matched=1
+    if [[ "$line" =~ $IGNORE_PATTERNS ]]; then
+        matched=0
+    fi
+
+    if [[ "$had_nocasematch" -eq 0 ]]; then
+        shopt -u nocasematch
+    fi
+
+    return $matched
+}
+
 # Strip unwanted prefixes from log lines based on STRIP_PATTERN or STRIP_PRESET
 strip_log_prefix() {
     local line="$1"
@@ -703,6 +786,7 @@ colorize_line() {
     local line="$1"
     local app="$2"
     local app_color="${3:-$RESET}"
+    local already_stripped="${4:-false}"
     
     # Skip empty lines
     if [[ -z "$line" ]]; then
@@ -711,10 +795,12 @@ colorize_line() {
     fi
     
     # Apply strip pattern if configured
-    if [[ -n "$STRIP_PATTERN" ]] || [[ -n "$STRIP_PRESET" ]] || 
-       [[ "$STRIP_FRONT" -gt 0 ]] 2>/dev/null || [[ "$STRIP_BACK" -gt 0 ]] 2>/dev/null ||
-       [[ -n "$STRIP_BEFORE" ]] || [[ -n "$STRIP_AFTER" ]]; then
-        line=$(strip_log_prefix "$line")
+    if [[ "$already_stripped" != "true" ]]; then
+        if [[ -n "$STRIP_PATTERN" ]] || [[ -n "$STRIP_PRESET" ]] || 
+           [[ "$STRIP_FRONT" -gt 0 ]] 2>/dev/null || [[ "$STRIP_BACK" -gt 0 ]] 2>/dev/null ||
+           [[ -n "$STRIP_BEFORE" ]] || [[ -n "$STRIP_AFTER" ]]; then
+            line=$(strip_log_prefix "$line")
+        fi
     fi
     
     # Apply wrapping if configured
@@ -724,8 +810,7 @@ colorize_line() {
     fi
     
     # Detect log level and colorize
-    local line_lower
-    line_lower=$(echo "$line" | tr '[:upper:]' '[:lower:]')
+    local line_lower="${line,,}"
     
     local color="$RESET"
     if [[ "$line_lower" =~ ($HIGHLIGHT_ERRORS) ]]; then
@@ -744,8 +829,7 @@ colorize_line() {
 # Detect log level from a line
 detect_log_level() {
     local line="$1"
-    local line_lower
-    line_lower=$(echo "$line" | tr '[:upper:]' '[:lower:]')
+    local line_lower="${line,,}"
     
     if [[ "$line_lower" =~ ($HIGHLIGHT_ERRORS) ]]; then
         echo "error"
@@ -776,8 +860,12 @@ format_line_json() {
     level=$(detect_log_level "$line")
     
     # Escape special characters for JSON
-    local escaped_line
-    escaped_line=$(echo "$line" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' | tr -d '\n\r')
+    local escaped_line="$line"
+    escaped_line="${escaped_line//\\/\\\\}"
+    escaped_line="${escaped_line//\"/\\\"}"
+    escaped_line="${escaped_line//$'\t'/\\t}"
+    escaped_line="${escaped_line//$'\n'/}"
+    escaped_line="${escaped_line//$'\r'/}"
     
     printf '{"app":"%s","level":"%s","timestamp":"%s","message":"%s"}\n' \
         "$app" "$level" "$timestamp" "$escaped_line"
@@ -789,10 +877,8 @@ format_output_json() {
     
     while IFS= read -r line || [[ -n "$line" ]]; do
         # Apply ignore patterns
-        if [[ -n "$IGNORE_PATTERNS" ]]; then
-            if echo "$line" | grep -qiE "$IGNORE_PATTERNS"; then
-                continue
-            fi
+        if should_ignore_line "$line"; then
+            continue
         fi
         
         format_line_json "$line" "$app"
@@ -806,10 +892,8 @@ format_output() {
     
     while IFS= read -r line || [[ -n "$line" ]]; do
         # Apply ignore patterns
-        if [[ -n "$IGNORE_PATTERNS" ]]; then
-            if echo "$line" | grep -qiE "$IGNORE_PATTERNS"; then
-                continue
-            fi
+        if should_ignore_line "$line"; then
+            continue
         fi
         
         colorize_line "$line" "$app" "$app_color"
@@ -1103,21 +1187,16 @@ cmd_view() {
     echo -e "${BOLD}${HEADER_COLOR:-$CYAN}═══ $app ═══${RESET}"
     echo -e "${GRAY}$log_file ($total_lines lines, $size)${RESET}\n"
     
-    # Build filter pipeline
-    local search_filter=""
-    local error_filter=""
-    
     # Search filtering
     if [[ -n "$search" ]]; then
         echo -e "${YELLOW}Searching for: '$search'${RESET}\n"
-        search_filter="grep -i --color=always '$search'"
     fi
     
     # Error filtering
+    local pattern=""
     if [[ "$errors_only" == "true" ]]; then
         echo -e "${YELLOW}Showing errors and warnings only${RESET}\n"
-        local pattern="$HIGHLIGHT_ERRORS|$HIGHLIGHT_WARNINGS"
-        error_filter="grep -iE '$pattern'"
+        pattern="$HIGHLIGHT_ERRORS|$HIGHLIGHT_WARNINGS"
     fi
     
     if [[ "$follow" == "true" ]]; then
@@ -1126,16 +1205,16 @@ cmd_view() {
         echo -e "${BORDER_COLOR:-$GRAY}────────────────────────────────────────────────────────────${RESET}"
         
         # Build the follow pipeline
-        if [[ -n "$search_filter" ]] && [[ -n "$error_filter" ]]; then
-            tail -f "$log_file" | eval "$search_filter" | eval "$error_filter" | while IFS= read -r line; do
+        if [[ -n "$search" ]] && [[ "$errors_only" == "true" ]]; then
+            tail -f "$log_file" | grep -i --color=always -- "$search" | grep -iE "$pattern" | while IFS= read -r line; do
                 format_follow_line "$line" "$app"
             done
-        elif [[ -n "$search_filter" ]]; then
-            tail -f "$log_file" | eval "$search_filter" | while IFS= read -r line; do
+        elif [[ -n "$search" ]]; then
+            tail -f "$log_file" | grep -i --color=always -- "$search" | while IFS= read -r line; do
                 format_follow_line "$line" "$app"
             done
-        elif [[ -n "$error_filter" ]]; then
-            tail -f "$log_file" | eval "$error_filter" | while IFS= read -r line; do
+        elif [[ "$errors_only" == "true" ]]; then
+            tail -f "$log_file" | grep -iE "$pattern" | while IFS= read -r line; do
                 format_follow_line "$line" "$app"
             done
         else
@@ -1149,18 +1228,18 @@ cmd_view() {
         
         # Time filtering requires reading full file
         if [[ -n "$since" ]] || [[ -n "$until" ]]; then
-            content=$(cat "$log_file" | filter_by_time "$since" "$until" | tail -n "$lines")
+            content=$(filter_by_time "$since" "$until" < "$log_file" | tail -n "$lines")
         else
             content=$(tail -n "$lines" "$log_file")
         fi
         
         # Apply filters
-        if [[ -n "$search_filter" ]]; then
-            content=$(echo "$content" | eval "$search_filter" || true)
+        if [[ -n "$search" ]]; then
+            content=$(echo "$content" | grep -i --color=always -- "$search" || true)
         fi
         
-        if [[ -n "$error_filter" ]]; then
-            content=$(echo "$content" | eval "$error_filter" || true)
+        if [[ "$errors_only" == "true" ]]; then
+            content=$(echo "$content" | grep -iE "$pattern" || true)
         fi
         
         # Output with formatting
@@ -1172,15 +1251,14 @@ cmd_view() {
 format_follow_line() {
     local line="$1"
     local app="$2"
+    local already_stripped="${3:-false}"
     
     # Skip empty lines
     [[ -z "$line" ]] && return
     
     # Apply ignore patterns
-    if [[ -n "$IGNORE_PATTERNS" ]]; then
-        if echo "$line" | grep -qiE "$IGNORE_PATTERNS"; then
-            return
-        fi
+    if should_ignore_line "$line"; then
+        return
     fi
     
     # Add reception timestamp if enabled
@@ -1193,7 +1271,7 @@ format_follow_line() {
     
     # Colorize and output
     local colored_line
-    colored_line=$(colorize_line "$line" "$app")
+    colored_line=$(colorize_line "$line" "$app" "$RESET" "$already_stripped")
     echo -e "${prefix}${colored_line}"
 }
 
@@ -1233,7 +1311,8 @@ cmd_view_all() {
     else
         for log_file in "${log_files[@]}"; do
             local app
-            app=$(basename "$log_file" "$LOG_EXTENSION")
+            app="${log_file##*/}"
+            app="${app%$LOG_EXTENSION}"
             local app_color
             app_color=$(get_app_color "$app")
             
@@ -1282,9 +1361,7 @@ cmd_clean() {
     fi
 
     # Delete all log files recursively, including nested directories
-    find "$log_dir" -name "*$LOG_EXTENSION" -type f -delete 2>/dev/null
-    # Also delete the _combined.log if it exists
-    find "$log_dir" -name "_combined.log" -type f -delete 2>/dev/null
+    find "$log_dir" -type f \( -name "*$LOG_EXTENSION" -o -name "_combined.log" \) -delete 2>/dev/null
     
     # Optionally remove empty directories left behind
     find "$log_dir" -type d -empty -delete 2>/dev/null || true
@@ -1681,7 +1758,7 @@ cmd_export() {
         
         # Read all or last N lines
         if [[ "$lines" -eq 0 ]]; then
-            content=$(cat "$log_file")
+            content=$(<"$log_file")
         else
             content=$(tail -n "$lines" "$log_file")
         fi
@@ -1776,6 +1853,8 @@ cmd_view_json() {
 process_multiplexed_logs() {
     local project_root="$1"
     local log_dir="$project_root/$LOG_DIR"
+    local -A app_log_file_cache=()
+    local -A ensured_dirs=()
     
     mkdir -p "$log_dir"
     
@@ -1814,9 +1893,18 @@ process_multiplexed_logs() {
             app_name="${app_name%"${app_name##*[![:space:]]}"}"
             
             local log_file
-            log_file=$(get_log_file "$project_root" "$app_name")
-            # Ensure dir exists
-            mkdir -p "$(dirname "$log_file")"
+            if [[ -n "${app_log_file_cache[$app_name]+x}" ]]; then
+                log_file="${app_log_file_cache[$app_name]}"
+            else
+                log_file=$(get_log_file "$project_root" "$app_name")
+                app_log_file_cache["$app_name"]="$log_file"
+            fi
+
+            local log_file_dir="${log_file%/*}"
+            if [[ -z "${ensured_dirs[$log_file_dir]+x}" ]]; then
+                mkdir -p "$log_file_dir"
+                ensured_dirs["$log_file_dir"]=1
+            fi
             
             # Apply stripping before writing to file
             local stripped_line="$line"
@@ -1825,8 +1913,12 @@ process_multiplexed_logs() {
             fi
             echo "$stripped_line" >> "$log_file"
             
-            # Format for display (strip_log_prefix is called inside format_follow_line -> colorize_line)
-            format_follow_line "$line" "$app_name"
+            # Format for display
+            if [[ "$do_strip" == "true" ]]; then
+                format_follow_line "$stripped_line" "$app_name" "true"
+            else
+                format_follow_line "$line" "$app_name"
+            fi
         else
             # No app detected
             # Write to a combined log file so we don't lose data if regex fails
@@ -1908,7 +2000,8 @@ cmd_run() {
     for app in "${apps[@]}"; do
         local log_file
         log_file=$(get_log_file "$project_root" "$app")
-        mkdir -p "$(dirname "$log_file")"
+        local log_file_dir="${log_file%/*}"
+        mkdir -p "$log_file_dir"
         
         # Clear existing log file
         > "$log_file"
@@ -1922,7 +2015,7 @@ cmd_run() {
             NX_DAEMON=false NX_INTERACTIVE=false $nx_cmd run "$app:$target" --output-style=stream "${args[@]}" 2>&1 \
             | eval "$strip_filter" \
             | tee "$log_file" \
-            | while IFS= read -r line; do format_follow_line "$line" "$app"; done 
+            | while IFS= read -r line; do format_follow_line "$line" "$app" "true"; done 
         ) &
     done
     
